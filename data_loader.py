@@ -4,6 +4,8 @@ from torch.utils.data import DataLoader, Dataset
 import random
 from PIL import Image
 import matplotlib.pyplot as plt
+import cv2
+import random
 
 class ImgDataSet(Dataset):
     def __init__(self, img_dir, img_fnames, img_transform, mask_dir, mask_fnames, mask_transform):
@@ -39,6 +41,9 @@ class ImgDataSet(Dataset):
 
     def __len__(self):
         return len(self.img_fnames)
+    
+
+        
 
 
 class ImgDataSetJoint(Dataset):
@@ -67,22 +72,26 @@ class ImgDataSetJoint(Dataset):
         if self.joint_transform is not None:
             img, mask = self.joint_transform([img, mask])
 
+        #custom debug
+#         test = np.array(img)
+#         cv2.imwrite(os.path.join('/home/jovyan/work/hangman/Notebook/crack_segmentation/test_folder', str(random.randint(1,1000))+'.jpg'), test)
+        
         #debug
-        # img = np.asarray(img)
-        # mask = np.asarray(mask)
-        # plt.subplot(121)
-        # plt.imshow(img)
-        # plt.subplot(122)
-        # plt.imshow(img)
-        # plt.imshow(mask, alpha=0.4)
-        # plt.show()
+#         img = np.asarray(img)
+#         mask = np.asarray(mask)
+#         plt.subplot(121)
+#         plt.imshow(img)
+#         plt.subplot(122)
+#         plt.imshow(img)
+#         plt.imshow(mask, alpha=0.4)
+#         plt.show()
 
         if self.img_transform is not None:
             img = self.img_transform(img)
 
         if self.mask_transform is not None:
             mask = self.mask_transform(mask)
-
+            
         return img, mask #torch.from_numpy(np.array(mask, dtype=np.int64))
 
     def __len__(self):

@@ -36,14 +36,23 @@ if __name__ == '__main__':
     arg = parser.add_argument
     arg('-ground_truth_dir', type=str,  required=True, help='path where ground truth images are located')
     arg('-pred_dir', type=str, required=True,  help='path with predictions')
-    arg('-threshold', type=float, default=0.2, required=False,  help='crack threshold detection')
+    arg('-threshold', type=float, default=0.5, required=False,  help='crack threshold detection')
     args = parser.parse_args()
 
     result_dice = []
     result_jaccard = []
-
+    
+    # test
+    test = []
+    
     paths = [path for path in  Path(args.ground_truth_dir).glob('*')]
     for file_name in tqdm(paths):
+        
+        # test
+        if cv2.imread(str(file_name), 0) is None:
+            test.append(file_name)
+            continue
+            
         y_true = (cv2.imread(str(file_name), 0) > 0).astype(np.uint8)
 
         pred_file_name = Path(args.pred_dir) / file_name.name
@@ -69,3 +78,6 @@ if __name__ == '__main__':
 
     print('Dice = ', np.mean(result_dice), np.std(result_dice))
     print('Jaccard = ', np.mean(result_jaccard), np.std(result_jaccard))
+    
+    # test
+    print('test :', test)

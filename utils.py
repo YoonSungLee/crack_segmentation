@@ -7,7 +7,9 @@ import numpy as np
 
 import torch
 import tqdm
-from unet.unet_transfer import UNet16, UNetResNet
+from unet.unet_transfer import UNet16, UNet16_bn, UNet16_bn_do, UNet16_fullbn_do, UNetResNet
+from unet.UNet_3Plus import UNet_3Plus
+from unet.UNet_2Plus import UNet_2Plus
 
 
 class AverageMeter(object):
@@ -27,7 +29,8 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 def cuda(x):
-    return x.cuda(async=True) if torch.cuda.is_available() else x
+#     return x.cuda(async=True) if torch.cuda.is_available() else x
+    return x.cuda() if torch.cuda.is_available() else x
 
 def write_event(log, step, **data):
     data['step'] = step
@@ -59,6 +62,81 @@ def create_model(device, type ='vgg16'):
 
 def load_unet_vgg16(model_path):
     model = UNet16(pretrained=True)
+    checkpoint = torch.load(model_path)
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    elif 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['check_point'])
+    else:
+        raise Exception('undefind model format')
+
+    model.cuda()
+    model.eval()
+
+    return model
+
+def load_unet_vgg16_bn(model_path):
+    model = UNet16_bn(pretrained=True)
+    checkpoint = torch.load(model_path)
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    elif 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['check_point'])
+    else:
+        raise Exception('undefind model format')
+
+    model.cuda()
+    model.eval()
+
+    return model
+
+def load_unet_vgg16_bn_do(model_path):
+    model = UNet16_bn_do(pretrained=True)
+    checkpoint = torch.load(model_path)
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    elif 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['check_point'])
+    else:
+        raise Exception('undefind model format')
+
+    model.cuda()
+    model.eval()
+
+    return model
+
+def load_unet_vgg16_fullbn_do(model_path):
+    model = UNet16_fullbn_do(pretrained=True)
+    checkpoint = torch.load(model_path)
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    elif 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['check_point'])
+    else:
+        raise Exception('undefind model format')
+
+    model.cuda()
+    model.eval()
+
+    return model
+
+def load_unet_3plus(model_path):
+    model = UNet_3Plus()
+    checkpoint = torch.load(model_path)
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    elif 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['check_point'])
+    else:
+        raise Exception('undefind model format')
+
+    model.cuda()
+    model.eval()
+
+    return model
+
+def load_unet_2plus(model_path):
+    model = UNet_2Plus()
     checkpoint = torch.load(model_path)
     if 'model' in checkpoint:
         model.load_state_dict(checkpoint['model'])

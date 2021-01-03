@@ -33,16 +33,12 @@ if __name__ == '__main__':
     tr_losses = [tr_losses[idx] for idx in sorted_idxs]
     vl_losses = [vl_losses[idx] for idx in sorted_idxs]
 
-    print(tr_losses)
-    print(vl_losses)
-
+#     print(tr_losses)
+#     print(vl_losses)
+    
     plt.plot(tr_losses[1:], label='train_loss')
     plt.plot(vl_losses[1:], label='valid_loss')
     plt.title(args.title)
     plt.legend()
     plt.show()
-
-
-
-
-
+    plt.savefig('result.png')

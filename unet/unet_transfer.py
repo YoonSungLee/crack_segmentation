@@ -37,7 +37,7 @@ class ConvRelu(nn.Module):
 
 
 class DecoderBlockV2(nn.Module):
-    def __init__(self, in_channels, middle_channels, out_channels, is_deconv=True):
+    def __init__(self, in_channels, middle_channels, out_channels, is_deconv=True, is_dropout=False):
         super(DecoderBlockV2, self).__init__()
         self.in_channels = in_channels
 
@@ -53,11 +53,55 @@ class DecoderBlockV2(nn.Module):
                                    padding=1),
                 nn.ReLU(inplace=True)
             )
+        elif is_dropout:
+            self.block = nn.Sequential(
+                Interpolate(scale_factor=2, mode='bilinear'),
+                ConvRelu(in_channels, middle_channels),
+                nn.Dropout(0.3),
+                ConvRelu(middle_channels, out_channels)
+            )
+        else:
+            self.block = nn.Sequential(
+                Interpolate(scale_factor=2, mode='bilinear'),
+                ConvRelu(in_channels, middle_channels),
+                ConvRelu(middle_channels, out_channels)
+            )
+
+    def forward(self, x):
+        return self.block(x)
+    
+class DecoderBlockV2_bn(nn.Module):
+    def __init__(self, in_channels, middle_channels, out_channels, is_deconv=True, is_dropout=False):
+        super(DecoderBlockV2_bn, self).__init__()
+        self.in_channels = in_channels
+
+        if is_deconv:
+            """
+                Paramaters for Deconvolution were chosen to avoid artifacts, following
+                link https://distill.pub/2016/deconv-checkerboard/
+            """
+
+            self.block = nn.Sequential(
+                ConvRelu(in_channels, middle_channels),
+                nn.ConvTranspose2d(middle_channels, out_channels, kernel_size=4, stride=2,
+                                   padding=1),
+                nn.ReLU(inplace=True)
+            )
+        elif is_dropout:
+            self.block = nn.Sequential(
+                Interpolate(scale_factor=2, mode='bilinear'),
+                ConvRelu(in_channels, middle_channels),
+                ConvRelu(middle_channels, out_channels),
+                nn.BatchNorm2d(out_channels),
+                nn.Dropout(0.3)
+            )
         else:
             self.block = nn.Sequential(
                 Interpolate(scale_factor=2, mode='bilinear'),
                 ConvRelu(in_channels, middle_channels),
                 ConvRelu(middle_channels, out_channels),
+                nn.BatchNorm2d(out_channels),
+                
             )
 
     def forward(self, x):
@@ -123,6 +167,280 @@ class UNet16(nn.Module):
         self.dec4 = DecoderBlockV2(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv)
         self.dec3 = DecoderBlockV2(256 + num_filters * 8, num_filters * 4 * 2, num_filters * 2, is_deconv)
         self.dec2 = DecoderBlockV2(128 + num_filters * 2, num_filters * 2 * 2, num_filters, is_deconv)
+        self.dec1 = ConvRelu(64 + num_filters, num_filters)
+        self.final = nn.Conv2d(num_filters, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        conv1 = self.conv1(x)
+        conv2 = self.conv2(self.pool(conv1))
+        conv3 = self.conv3(self.pool(conv2))
+        conv4 = self.conv4(self.pool(conv3))
+        conv5 = self.conv5(self.pool(conv4))
+
+        center = self.center(self.pool(conv5))
+
+        dec5 = self.dec5(torch.cat([center, conv5], 1))
+
+        dec4 = self.dec4(torch.cat([dec5, conv4], 1))
+        dec3 = self.dec3(torch.cat([dec4, conv3], 1))
+        dec2 = self.dec2(torch.cat([dec3, conv2], 1))
+        dec1 = self.dec1(torch.cat([dec2, conv1], 1))
+
+        if self.num_classes > 1:
+            x_out = F.log_softmax(self.final(dec1), dim=1)
+        else:
+            x_out = self.final(dec1)
+            #x_out = F.sigmoid(x_out)
+
+        return x_out
+
+class UNet16_bn(nn.Module):
+    def __init__(self, num_classes=1, num_filters=32, pretrained=False, is_deconv=False):
+        """
+        :param num_classes:
+        :param num_filters:
+        :param pretrained:
+            False - no pre-trained network used
+            True - encoder pre-trained with VGG16
+        :is_deconv:
+            False: bilinear interpolation is used in decoder
+            True: deconvolution is used in decoder
+        """
+        super().__init__()
+        self.num_classes = num_classes
+
+        self.pool = nn.MaxPool2d(2, 2)
+
+        #print(torchvision.models.vgg16(pretrained=pretrained))
+
+        self.encoder = torchvision.models.vgg16(pretrained=pretrained).features
+
+        self.relu = nn.ReLU(inplace=True)
+
+        self.conv1 = nn.Sequential(self.encoder[0],
+                                   self.relu,
+                                   self.encoder[2],
+                                   self.relu)
+
+        self.conv2 = nn.Sequential(self.encoder[5],
+                                   self.relu,
+                                   self.encoder[7],
+                                   self.relu)
+
+        self.conv3 = nn.Sequential(self.encoder[10],
+                                   self.relu,
+                                   self.encoder[12],
+                                   self.relu,
+                                   self.encoder[14],
+                                   self.relu)
+
+        self.conv4 = nn.Sequential(self.encoder[17],
+                                   self.relu,
+                                   self.encoder[19],
+                                   self.relu,
+                                   self.encoder[21],
+                                   self.relu)
+
+        self.conv5 = nn.Sequential(self.encoder[24],
+                                   self.relu,
+                                   self.encoder[26],
+                                   self.relu,
+                                   self.encoder[28],
+                                   self.relu)
+
+        self.center = DecoderBlockV2_bn(512, num_filters * 8 * 2, num_filters * 8, is_deconv)
+
+        self.dec5 = DecoderBlockV2_bn(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv)
+        self.dec4 = DecoderBlockV2_bn(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv)
+        self.dec3 = DecoderBlockV2_bn(256 + num_filters * 8, num_filters * 4 * 2, num_filters * 2, is_deconv)
+        self.dec2 = DecoderBlockV2(128 + num_filters * 2, num_filters * 2 * 2, num_filters, is_deconv)
+        self.dec1 = ConvRelu(64 + num_filters, num_filters)
+        self.final = nn.Conv2d(num_filters, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        conv1 = self.conv1(x)
+        conv2 = self.conv2(self.pool(conv1))
+        conv3 = self.conv3(self.pool(conv2))
+        conv4 = self.conv4(self.pool(conv3))
+        conv5 = self.conv5(self.pool(conv4))
+
+        center = self.center(self.pool(conv5))
+
+        dec5 = self.dec5(torch.cat([center, conv5], 1))
+
+        dec4 = self.dec4(torch.cat([dec5, conv4], 1))
+        dec3 = self.dec3(torch.cat([dec4, conv3], 1))
+        dec2 = self.dec2(torch.cat([dec3, conv2], 1))
+        dec1 = self.dec1(torch.cat([dec2, conv1], 1))
+
+        if self.num_classes > 1:
+            x_out = F.log_softmax(self.final(dec1), dim=1)
+        else:
+            x_out = self.final(dec1)
+            #x_out = F.sigmoid(x_out)
+
+        return x_out
+
+class UNet16_bn_do(nn.Module):
+    def __init__(self, num_classes=1, num_filters=32, pretrained=False, is_deconv=False):
+        """
+        :param num_classes:
+        :param num_filters:
+        :param pretrained:
+            False - no pre-trained network used
+            True - encoder pre-trained with VGG16
+        :is_deconv:
+            False: bilinear interpolation is used in decoder
+            True: deconvolution is used in decoder
+        """
+        super().__init__()
+        self.num_classes = num_classes
+
+        self.pool = nn.MaxPool2d(2, 2)
+
+        #print(torchvision.models.vgg16(pretrained=pretrained))
+
+        self.encoder = torchvision.models.vgg16(pretrained=pretrained).features
+
+        self.relu = nn.ReLU(inplace=True)
+
+        self.conv1 = nn.Sequential(self.encoder[0],
+                                   self.relu,
+                                   self.encoder[2],
+                                   self.relu)
+
+        self.conv2 = nn.Sequential(self.encoder[5],
+                                   self.relu,
+                                   self.encoder[7],
+                                   self.relu)
+
+        self.conv3 = nn.Sequential(self.encoder[10],
+                                   self.relu,
+                                   self.encoder[12],
+                                   self.relu,
+                                   self.encoder[14],
+                                   self.relu)
+
+        self.conv4 = nn.Sequential(self.encoder[17],
+                                   self.relu,
+                                   self.encoder[19],
+                                   self.relu,
+                                   self.encoder[21],
+                                   self.relu)
+
+        self.conv5 = nn.Sequential(self.encoder[24],
+                                   self.relu,
+                                   self.encoder[26],
+                                   self.relu,
+                                   self.encoder[28],
+                                   self.relu)
+
+        self.center = DecoderBlockV2_bn(512, num_filters * 8 * 2, num_filters * 8, is_deconv)
+
+        self.dec5 = DecoderBlockV2_bn(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv)
+        self.dec4 = DecoderBlockV2_bn(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv, is_dropout=True)
+        self.dec3 = DecoderBlockV2_bn(256 + num_filters * 8, num_filters * 4 * 2, num_filters * 2, is_deconv, is_dropout=True)
+        self.dec2 = DecoderBlockV2(128 + num_filters * 2, num_filters * 2 * 2, num_filters, is_deconv, is_dropout=True)
+        self.dec1 = ConvRelu(64 + num_filters, num_filters)
+        self.final = nn.Conv2d(num_filters, num_classes, kernel_size=1)
+
+    def forward(self, x):
+        conv1 = self.conv1(x)
+        conv2 = self.conv2(self.pool(conv1))
+        conv3 = self.conv3(self.pool(conv2))
+        conv4 = self.conv4(self.pool(conv3))
+        conv5 = self.conv5(self.pool(conv4))
+
+        center = self.center(self.pool(conv5))
+
+        dec5 = self.dec5(torch.cat([center, conv5], 1))
+
+        dec4 = self.dec4(torch.cat([dec5, conv4], 1))
+        dec3 = self.dec3(torch.cat([dec4, conv3], 1))
+        dec2 = self.dec2(torch.cat([dec3, conv2], 1))
+        dec1 = self.dec1(torch.cat([dec2, conv1], 1))
+
+        if self.num_classes > 1:
+            x_out = F.log_softmax(self.final(dec1), dim=1)
+        else:
+            x_out = self.final(dec1)
+            #x_out = F.sigmoid(x_out)
+
+        return x_out
+
+class UNet16_fullbn_do(nn.Module):
+    def __init__(self, num_classes=1, num_filters=32, pretrained=False, is_deconv=False):
+        """
+        :param num_classes:
+        :param num_filters:
+        :param pretrained:
+            False - no pre-trained network used
+            True - encoder pre-trained with VGG16
+        :is_deconv:
+            False: bilinear interpolation is used in decoder
+            True: deconvolution is used in decoder
+        """
+        super().__init__()
+        self.num_classes = num_classes
+
+        self.pool = nn.MaxPool2d(2, 2)
+
+        #print(torchvision.models.vgg16(pretrained=pretrained))
+
+        self.encoder = torchvision.models.vgg16_bn(pretrained=pretrained).features
+
+        self.relu = nn.ReLU(inplace=True)
+
+        self.conv1 = nn.Sequential(self.encoder[0],
+                                   self.encoder[1],
+                                   self.relu,
+                                   self.encoder[3],
+                                   self.encoder[4],
+                                   self.relu)
+
+        self.conv2 = nn.Sequential(self.encoder[7],
+                                   self.encoder[8],
+                                   self.relu,
+                                   self.encoder[10],
+                                   self.encoder[11],
+                                   self.relu)
+
+        self.conv3 = nn.Sequential(self.encoder[14],
+                                   self.encoder[15],
+                                   self.relu,
+                                   self.encoder[17],
+                                   self.encoder[18],
+                                   self.relu,
+                                   self.encoder[20],
+                                   self.encoder[21],
+                                   self.relu)
+
+        self.conv4 = nn.Sequential(self.encoder[24],
+                                   self.encoder[25],
+                                   self.relu,
+                                   self.encoder[27],
+                                   self.encoder[28],
+                                   self.relu,
+                                   self.encoder[30],
+                                   self.encoder[31],
+                                   self.relu)
+
+        self.conv5 = nn.Sequential(self.encoder[34],
+                                   self.encoder[35],
+                                   self.relu,
+                                   self.encoder[37],
+                                   self.encoder[38],
+                                   self.relu,
+                                   self.encoder[40],
+                                   self.encoder[41],
+                                   self.relu)
+
+        self.center = DecoderBlockV2_bn(512, num_filters * 8 * 2, num_filters * 8, is_deconv)
+
+        self.dec5 = DecoderBlockV2_bn(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv)
+        self.dec4 = DecoderBlockV2_bn(512 + num_filters * 8, num_filters * 8 * 2, num_filters * 8, is_deconv, is_dropout=True)
+        self.dec3 = DecoderBlockV2_bn(256 + num_filters * 8, num_filters * 4 * 2, num_filters * 2, is_deconv, is_dropout=True)
+        self.dec2 = DecoderBlockV2(128 + num_filters * 2, num_filters * 2 * 2, num_filters, is_deconv, is_dropout=True)
         self.dec1 = ConvRelu(64 + num_filters, num_filters)
         self.final = nn.Conv2d(num_filters, num_classes, kernel_size=1)
 
